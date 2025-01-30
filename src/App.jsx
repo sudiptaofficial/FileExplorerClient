@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import { Home } from './Pages/Home'
+
 import Error from './Pages/Error'
+import Home from './Pages/Home'
 
 
 function App() {
