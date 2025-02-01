@@ -89,29 +89,43 @@ const initialData = [
 
 
 const Home = () => {
-  
   const [files, setFiles] = useState(initialData);
+  // currentPath is an array of folder objects representing the navigation path
   const [currentPath, setCurrentPath] = useState([]);
+  // currentFiles is the list of items (files/folders) in the current folder
   const [currentFiles, setCurrentFiles] = useState(initialData);
   const [showModal, setShowModal] = useState(false);
   const [newItemName, setNewItemName] = useState("");
-  const [modalType, setModalType] = useState(""); // "folder", "file", or "rename"
+  // modalType can be "folder", "file", or "rename"
+  const [modalType, setModalType] = useState("");
+  // selectedItem is used when renaming an item
   const [selectedItem, setSelectedItem] = useState(null);
+
+  // Helper: Retrieve the list of items in the current folder by traversing the data structure
+  const getCurrentFiles = (data, path) => {
+    if (path.length === 0) return data;
+    let folder = data;
+    path.forEach((item) => {
+      folder = folder.find((f) => f.id === item.id).children;
+    });
+    return folder;
+  };
 
   // Navigate into a folder
   const navigateToFolder = (folder) => {
-    setCurrentPath([...currentPath, folder]);
+    const newPath = [...currentPath, folder];
+    setCurrentPath(newPath);
     setCurrentFiles(folder.children);
   };
 
-  // Navigate back
+  // Navigate back using the breadcrumb index (index: -1 means Home)
   const navigateBack = (index) => {
-    const newPath = currentPath.slice(0, index + 1);
+    const newPath = index === -1 ? [] : currentPath.slice(0, index + 1);
     setCurrentPath(newPath);
-    setCurrentFiles(index === -1 ? files : newPath[newPath.length - 1].children);
+    setCurrentFiles(getCurrentFiles(files, newPath));
   };
 
-  // Open modal for new folder or file
+  // Open modal for creating new folder/file
   const openNewModal = (type) => {
     setModalType(type);
     setNewItemName("");
@@ -119,7 +133,7 @@ const Home = () => {
     setShowModal(true);
   };
 
-  // Open rename modal
+  // Open modal for renaming an existing item
   const openRenameModal = (item) => {
     setModalType("rename");
     setNewItemName(item.name);
@@ -127,37 +141,42 @@ const Home = () => {
     setShowModal(true);
   };
 
-  // Create a new folder or file
+  // Create a new folder or file at the current location
   const handleCreateNew = () => {
     if (!newItemName.trim()) return;
-    
+
     const newItem = {
       id: Date.now(),
       name: newItemName,
-      type: modalType,
+      type: modalType, // "folder" or "file"
       children: modalType === "folder" ? [] : undefined,
     };
 
+    // Clone the root-level data
     const updatedFiles = [...files];
-    let targetFolder = currentPath.length === 0 ? updatedFiles : updatedFiles;
 
+    // Traverse the currentPath to reach the target folder's children array
+    let targetFolder = updatedFiles;
     currentPath.forEach((folder) => {
       targetFolder = targetFolder.find((f) => f.id === folder.id).children;
     });
 
+    // Add the new item to the target folder
     targetFolder.push(newItem);
-    setCurrentFiles([...currentFiles, newItem]);
+
+    // Update the state based on the new structure
     setFiles(updatedFiles);
-    
+    setCurrentFiles(getCurrentFiles(updatedFiles, currentPath));
     setShowModal(false);
   };
 
-  // Rename an item
+  // Rename an existing item
   const handleRename = () => {
     if (!newItemName.trim() || !selectedItem) return;
 
     const updatedFiles = [...files];
 
+    // Recursive function to update the item's name
     const updateItem = (arr, id, newName) => {
       arr.forEach((item) => {
         if (item.id === id) item.name = newName;
@@ -167,26 +186,38 @@ const Home = () => {
 
     updateItem(updatedFiles, selectedItem.id, newItemName);
     setFiles(updatedFiles);
-    setCurrentFiles([...currentFiles]);
-
+    setCurrentFiles(getCurrentFiles(updatedFiles, currentPath));
     setShowModal(false);
   };
 
-  // Delete an item
+  // Delete an item (folder or file) from the current folder
   const handleDelete = (item) => {
     const updatedFiles = [...files];
 
+    // Helper: Remove the item from an array based on its id
     const removeItem = (arr, id) => arr.filter((item) => item.id !== id);
 
-    let targetFolder = currentPath.length === 0 ? updatedFiles : updatedFiles;
-
+    // Traverse to the target folder
+    let targetFolder = updatedFiles;
     currentPath.forEach((folder) => {
       targetFolder = targetFolder.find((f) => f.id === folder.id).children;
     });
 
-    targetFolder.splice(targetFolder.indexOf(item), 1);
-    setCurrentFiles(removeItem(currentFiles, item.id));
-    setFiles(updatedFiles);
+    // Remove the item from the target folder
+    targetFolder = removeItem(targetFolder, item.id);
+
+    // We must update the parent's children in the overall data structure:
+    if (currentPath.length === 0) {
+      // If in root, update files directly
+      setFiles(removeItem(files, item.id));
+    } else {
+      // For nested folders, reassign the children for the last folder in the path
+      const parentFolder = getCurrentFiles(files, currentPath.slice(0, -1));
+      const lastFolder = parentFolder.find((f) => f.id === currentPath[currentPath.length - 1].id);
+      lastFolder.children = targetFolder;
+      setFiles(updatedFiles);
+    }
+    setCurrentFiles(getCurrentFiles(updatedFiles, currentPath));
   };
 
   return (
@@ -203,7 +234,8 @@ const Home = () => {
       <ListGroup>
         {currentFiles.map((file) => (
           <ListGroup.Item key={file.id} className="d-flex justify-content-between">
-            <span onClick={() => file.type === "folder" && navigateToFolder(file)}>
+            <span style={{ cursor: file.type === "folder" ? "pointer" : "default" }}
+              onClick={() => file.type === "folder" && navigateToFolder(file)}>
               {file.type === "folder" ? "📁" : "📄"} {file.name}
             </span>
             <div>
@@ -214,11 +246,15 @@ const Home = () => {
         ))}
       </ListGroup>
 
-      {/* Modal for New Folder, Upload File, Rename */}
+      {/* Modal for New Folder / Upload File / Rename */}
       <Modal show={showModal} onHide={() => setShowModal(false)}>
         <Modal.Header closeButton>
           <Modal.Title>
-            {modalType === "rename" ? "Rename" : modalType === "folder" ? "New Folder" : "Upload File"}
+            {modalType === "rename"
+              ? "Rename"
+              : modalType === "folder"
+              ? "New Folder"
+              : "Upload File"}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
@@ -240,6 +276,7 @@ const Home = () => {
       </Modal>
     </div>
   );
+  
 };
 
 export default Home;
