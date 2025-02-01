@@ -1,6 +1,16 @@
-import React, { useState } from "react";
-import { Button, ListGroup, Dropdown, Form, Modal } from "react-bootstrap";
+// import React, { useState } from "react";
+import { Button, ListGroup, Dropdown, Form, Modal,Spinner } from "react-bootstrap";
 import BreadcrumbNav from "../Components/BreadcrumbNav";
+import React, { useEffect, useState } from "react";
+
+import {
+  fetchFiles,
+  createFolder,
+  uploadFile,
+  renameFile,
+  deleteFile,
+  downloadFile,
+} from "../api";
 
 const initialData = [
   {
@@ -87,196 +97,246 @@ const initialData = [
   }
 ];
 
-
 const Home = () => {
-  const [files, setFiles] = useState(initialData);
-  // currentPath is an array of folder objects representing the navigation path
+  // currentPath: array of folder objects (each with _id and name)
   const [currentPath, setCurrentPath] = useState([]);
-  // currentFiles is the list of items (files/folders) in the current folder
-  const [currentFiles, setCurrentFiles] = useState(initialData);
+  // currentFiles: list of files/folders in current location
+  const [currentFiles, setCurrentFiles] = useState([]);
+  // Loading state for API calls
+  const [loading, setLoading] = useState(false);
+
+  // Modal state
   const [showModal, setShowModal] = useState(false);
-  const [newItemName, setNewItemName] = useState("");
-  // modalType can be "folder", "file", or "rename"
+  // modalType: "newFolder", "uploadFile", or "rename"
   const [modalType, setModalType] = useState("");
-  // selectedItem is used when renaming an item
+  // For new folder or rename modal
+  const [inputValue, setInputValue] = useState("");
+  // For rename, store the selected item
   const [selectedItem, setSelectedItem] = useState(null);
+  // For file upload modal, store the chosen file
+  const [selectedFile, setSelectedFile] = useState(null);
 
-  // Helper: Retrieve the list of items in the current folder by traversing the data structure
-  const getCurrentFiles = (data, path) => {
-    if (path.length === 0) return data;
-    let folder = data;
-    path.forEach((item) => {
-      folder = folder.find((f) => f.id === item.id).children;
-    });
-    return folder;
+  // Current parentId from path (if none, then root)
+  const currentParentId = currentPath.length > 0 ? currentPath[currentPath.length - 1]._id : "";
+
+  // Load files from backend whenever the currentParentId changes
+  const loadFiles = async () => {
+    setLoading(true);
+    try {
+      const res = await fetchFiles(currentParentId);
+      setCurrentFiles(res.data);
+    } catch (error) {
+      console.error("Error fetching files:", error);
+    }
+    setLoading(false);
   };
 
-  // Navigate into a folder
-  const navigateToFolder = (folder) => {
-    const newPath = [...currentPath, folder];
-    setCurrentPath(newPath);
-    setCurrentFiles(folder.children);
+  useEffect(() => {
+    loadFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentParentId]);
+
+  // Handle navigation to a folder
+  const handleNavigateFolder = (folder) => {
+    setCurrentPath([...currentPath, folder]);
   };
 
-  // Navigate back using the breadcrumb index (index: -1 means Home)
-  const navigateBack = (index) => {
-    const newPath = index === -1 ? [] : currentPath.slice(0, index + 1);
-    setCurrentPath(newPath);
-    setCurrentFiles(getCurrentFiles(files, newPath));
+  // Handle breadcrumb navigation
+  // index = -1 means navigate to Home (root)
+  // otherwise, slice the path array to index + 1
+  const handleNavigateBreadcrumb = (index) => {
+    if (index === -1) {
+      setCurrentPath([]);
+    } else {
+      setCurrentPath(currentPath.slice(0, index + 1));
+    }
   };
 
-  // Open modal for creating new folder/file
-  const openNewModal = (type) => {
+  // Open modal for new folder or file upload
+  const openModal = (type) => {
     setModalType(type);
-    setNewItemName("");
+    setInputValue("");
     setSelectedItem(null);
+    setSelectedFile(null);
     setShowModal(true);
   };
 
-  // Open modal for renaming an existing item
+  // Open modal for renaming an item
   const openRenameModal = (item) => {
     setModalType("rename");
-    setNewItemName(item.name);
     setSelectedItem(item);
+    setInputValue(item.name);
     setShowModal(true);
   };
 
-  // Create a new folder or file at the current location
-  const handleCreateNew = () => {
-    if (!newItemName.trim()) return;
-
-    const newItem = {
-      id: Date.now(),
-      name: newItemName,
-      type: modalType, // "folder" or "file"
-      children: modalType === "folder" ? [] : undefined,
-    };
-
-    // Clone the root-level data
-    const updatedFiles = [...files];
-
-    // Traverse the currentPath to reach the target folder's children array
-    let targetFolder = updatedFiles;
-    currentPath.forEach((folder) => {
-      targetFolder = targetFolder.find((f) => f.id === folder.id).children;
-    });
-
-    // Add the new item to the target folder
-    targetFolder.push(newItem);
-
-    // Update the state based on the new structure
-    setFiles(updatedFiles);
-    setCurrentFiles(getCurrentFiles(updatedFiles, currentPath));
-    setShowModal(false);
-  };
-
-  // Rename an existing item
-  const handleRename = () => {
-    if (!newItemName.trim() || !selectedItem) return;
-
-    const updatedFiles = [...files];
-
-    // Recursive function to update the item's name
-    const updateItem = (arr, id, newName) => {
-      arr.forEach((item) => {
-        if (item.id === id) item.name = newName;
-        if (item.children) updateItem(item.children, id, newName);
-      });
-    };
-
-    updateItem(updatedFiles, selectedItem.id, newItemName);
-    setFiles(updatedFiles);
-    setCurrentFiles(getCurrentFiles(updatedFiles, currentPath));
-    setShowModal(false);
-  };
-
-  // Delete an item (folder or file) from the current folder
-  const handleDelete = (item) => {
-    const updatedFiles = [...files];
-
-    // Helper: Remove the item from an array based on its id
-    const removeItem = (arr, id) => arr.filter((item) => item.id !== id);
-
-    // Traverse to the target folder
-    let targetFolder = updatedFiles;
-    currentPath.forEach((folder) => {
-      targetFolder = targetFolder.find((f) => f.id === folder.id).children;
-    });
-
-    // Remove the item from the target folder
-    targetFolder = removeItem(targetFolder, item.id);
-
-    // We must update the parent's children in the overall data structure:
-    if (currentPath.length === 0) {
-      // If in root, update files directly
-      setFiles(removeItem(files, item.id));
-    } else {
-      // For nested folders, reassign the children for the last folder in the path
-      const parentFolder = getCurrentFiles(files, currentPath.slice(0, -1));
-      const lastFolder = parentFolder.find((f) => f.id === currentPath[currentPath.length - 1].id);
-      lastFolder.children = targetFolder;
-      setFiles(updatedFiles);
+  // Create a new folder
+  const handleCreateFolder = async () => {
+    if (!inputValue.trim()) return;
+    try {
+      await createFolder(inputValue.trim(), currentParentId || null);
+      loadFiles();
+      setShowModal(false);
+    } catch (error) {
+      console.error("Error creating folder:", error);
     }
-    setCurrentFiles(getCurrentFiles(updatedFiles, currentPath));
+  };
+
+  // Upload a file
+  const handleUploadFile = async () => {
+    if (!selectedFile) return;
+    try {
+      await uploadFile(selectedFile, currentParentId || null);
+      loadFiles();
+      setShowModal(false);
+    } catch (error) {
+      console.error("Error uploading file:", error);
+    }
+  };
+
+  // Rename an item
+  const handleRename = async () => {
+    if (!inputValue.trim() || !selectedItem) return;
+    try {
+      await renameFile(selectedItem._id, inputValue.trim());
+      loadFiles();
+      setShowModal(false);
+    } catch (error) {
+      console.error("Error renaming item:", error);
+    }
+  };
+
+  // Delete an item (with confirmation)
+  const handleDelete = async (item) => {
+    if (window.confirm(`Are you sure you want to delete "${item.name}"?`)) {
+      try {
+        await deleteFile(item._id);
+        loadFiles();
+      } catch (error) {
+        console.error("Error deleting item:", error);
+      }
+    }
+  };
+
+  // Download an item
+  const handleDownload = async (item) => {
+    try {
+      const res = await downloadFile(item._id);
+      // Create a URL for the blob and trigger a download
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        item.type === "file" ? item.name : `${item.name}.zip`
+      );
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (error) {
+      console.error("Error downloading item:", error);
+    }
   };
 
   return (
     <div className="container mt-4">
       <h4>File Manager</h4>
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <BreadcrumbNav path={currentPath} navigateBack={navigateBack} />
+        <BreadcrumbNav path={currentPath} onNavigate={handleNavigateBreadcrumb} />
         <div>
-          <Button variant="primary" className="me-2" onClick={() => openNewModal("folder")}>New Folder</Button>
-          <Button variant="success" onClick={() => openNewModal("file")}>Upload File</Button>
+          <Button variant="primary" className="me-2" onClick={() => openModal("newFolder")}>
+            New Folder
+          </Button>
+          <Button variant="success" onClick={() => openModal("uploadFile")}>
+            Upload File
+          </Button>
         </div>
       </div>
 
-      <ListGroup>
-        {currentFiles.map((file) => (
-          <ListGroup.Item key={file.id} className="d-flex justify-content-between">
-            <span style={{ cursor: file.type === "folder" ? "pointer" : "default" }}
-              onClick={() => file.type === "folder" && navigateToFolder(file)}>
-              {file.type === "folder" ? "📁" : "📄"} {file.name}
-            </span>
-            <div>
-              <Button size="sm" variant="warning" onClick={() => openRenameModal(file)}>Rename</Button>
-              <Button size="sm" variant="danger" className="ms-2" onClick={() => handleDelete(file)}>Delete</Button>
-            </div>
-          </ListGroup.Item>
-        ))}
-      </ListGroup>
+      {loading ? (
+        <div className="text-center">
+          <Spinner animation="border" />
+        </div>
+      ) : (
+        <ListGroup>
+          {currentFiles.map((item) => (
+            <ListGroup.Item key={item._id} className="d-flex justify-content-between align-items-center">
+              <span
+                style={{ cursor: item.type === "folder" ? "pointer" : "default" }}
+                onClick={() => item.type === "folder" && handleNavigateFolder(item)}
+              >
+                {item.type === "folder" ? "📁" : "📄"} {item.name}
+              </span>
+              <Dropdown>
+                <Dropdown.Toggle variant="secondary" size="sm">
+                  Actions
+                </Dropdown.Toggle>
+                <Dropdown.Menu>
+                  <Dropdown.Item onClick={() => openRenameModal(item)}>Rename</Dropdown.Item>
+                  <Dropdown.Item onClick={() => handleDelete(item)} className="text-danger">
+                    Delete
+                  </Dropdown.Item>
+                  <Dropdown.Item onClick={() => handleDownload(item)}>Download</Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown>
+            </ListGroup.Item>
+          ))}
+        </ListGroup>
+      )}
 
-      {/* Modal for New Folder / Upload File / Rename */}
+      {/* Modal for New Folder, File Upload, and Rename */}
       <Modal show={showModal} onHide={() => setShowModal(false)}>
         <Modal.Header closeButton>
           <Modal.Title>
             {modalType === "rename"
               ? "Rename"
-              : modalType === "folder"
+              : modalType === "newFolder"
               ? "New Folder"
               : "Upload File"}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <Form.Control
-            type="text"
-            placeholder="Enter name"
-            value={newItemName}
-            onChange={(e) => setNewItemName(e.target.value)}
-          />
+          {modalType === "uploadFile" ? (
+            <Form.Group>
+              <Form.Label>Select File</Form.Label>
+              <Form.Control
+                type="file"
+                onChange={(e) => setSelectedFile(e.target.files[0])}
+              />
+            </Form.Group>
+          ) : (
+            <Form.Group>
+              <Form.Label>Enter Name</Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="Enter name"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+              />
+            </Form.Group>
+          )}
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
+          <Button variant="secondary" onClick={() => setShowModal(false)}>
+            Cancel
+          </Button>
           {modalType === "rename" ? (
-            <Button variant="primary" onClick={handleRename}>Rename</Button>
+            <Button variant="primary" onClick={handleRename}>
+              Rename
+            </Button>
+          ) : modalType === "newFolder" ? (
+            <Button variant="primary" onClick={handleCreateFolder}>
+              Create Folder
+            </Button>
           ) : (
-            <Button variant="primary" onClick={handleCreateNew}>Create</Button>
+            <Button variant="primary" onClick={handleUploadFile}>
+              Upload File
+            </Button>
           )}
         </Modal.Footer>
       </Modal>
     </div>
   );
-  
 };
+
 
 export default Home;
