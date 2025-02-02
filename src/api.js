@@ -15,11 +15,15 @@ export const fetchFiles = (parentId = "") =>
 export const createFolder = (name, parentId = null) =>
   axios.post(`${API_URL}/folder`, { name, parentId }, { headers: getAuthHeader() });
 
-export const uploadFile = (file, parentId = null) => {
+export const uploadFile = (file, parentId = null, relativePath = "", onUploadProgress) => {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("parentId", parentId);
-  return axios.post(`${API_URL}/file`, formData, { headers: getAuthHeader() });
+  formData.append("parentId", parentId ? parentId : "null");
+  if (relativePath) formData.append("relativePath", relativePath);
+  return axios.post(`${API_URL}/file`, formData, {
+    headers: { ...getAuthHeader() },
+    onUploadProgress
+  });
 };
 
 export const renameFile = (id, name) =>
